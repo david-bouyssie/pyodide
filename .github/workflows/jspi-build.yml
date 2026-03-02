@@ -35,6 +35,13 @@ jobs:
           key: ${{ hashFiles('Makefile.envs') }}-${{ runner.os }}-jspi-
           save-always: true
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Save Node.js 24 path
+        run: echo "NODE24_DIR=$(dirname $(which node))" >> $GITHUB_ENV
+
       - uses: actions/setup-go@v6
         with:
           go-version: '1.21'
@@ -50,6 +57,18 @@ jobs:
         run: |
           sudo apt install -y build-essential git xxd
           pip install -r requirements.txt
+
+      - name: Check Versions
+        shell: bash -l {0}
+        run: |
+          export PATH="$NODE24_DIR:$PATH"
+          python --version
+          node --version
+          npm --version
+          which python
+          which node
+          which npm
+          which go
 
       - name: Build emsdk
         shell: bash -l {0}
@@ -72,6 +91,7 @@ jobs:
         shell: bash -l {0}
         run: |
           source pyodide_env.sh
+          export PATH="$NODE24_DIR:$PATH"
           ccache -z
           PYODIDE_PACKAGES="tag:core" make -j3
           ccache -s
