@@ -36,6 +36,141 @@ export interface EmscriptenSettings {
   exitCode?: number;
 }
 
+// ============================================================================
+// JSPI: Suspending monkey-patch for async FS routing (D.6 technique)
+// ============================================================================
+
+const capturedRawSyscalls: Map<string, Function> = new Map();
+let RealSuspending: any = null;
+let suspendingPatched = false;
+
+/**
+ * Monkey-patch WebAssembly.Suspending to capture raw syscall functions.
+ * Must be called BEFORE _createPyodideModule() which triggers Emscripten's
+ * instrumentWasmImports().
+ */
+export function installSuspendingMonkeyPatch(): void {
+  if (
+    suspendingPatched ||
+    typeof WebAssembly === "undefined" ||
+    !("Suspending" in WebAssembly)
+  ) {
+    return;
+  }
+
+  RealSuspending = (WebAssembly as any).Suspending;
+
+  (WebAssembly as any).Suspending = function PatchedSuspending(fn: Function) {
+    const name = fn.name || "(anonymous)";
+    capturedRawSyscalls.set(name, fn);
+    return new RealSuspending(fn);
+  };
+
+  suspendingPatched = true;
+}
+
+const BRIDGED_ENV_SYSCALLS = [
+  "__syscall_openat",
+  "__syscall_stat64",
+  "__syscall_fstat64",
+  "__syscall_newfstatat",
+  "__syscall_fcntl64",
+  "__syscall_ioctl",
+  "__syscall_faccessat",
+  "__syscall_getdents64",
+  "__syscall_readlinkat",
+  "__syscall_mkdirat",
+  "__syscall_unlinkat",
+  "__syscall_renameat",
+  "__syscall_rmdir",
+  "__syscall_chmod",
+  "__syscall_fchmod",
+  "__syscall_truncate64",
+  "__syscall_ftruncate64",
+];
+
+const BRIDGED_WASI_SYSCALLS = [
+  "fd_read",
+  "fd_write",
+  "fd_pread",
+  "fd_pwrite",
+  "fd_seek",
+  "fd_close",
+  "fd_sync",
+  "fd_fdstat_get",
+];
+
+/**
+ * Replace Suspending-wrapped syscall imports with routing wrappers.
+ * Called from getInstantiateWasmFunc, before WebAssembly.instantiate.
+ */
+function instrumentSyscallImports(imports: {
+  [key: string]: { [key: string]: any };
+}): void {
+  if (!RealSuspending || capturedRawSyscalls.size === 0) {
+    return;
+  }
+
+  function findRaw(name: string): Function | undefined {
+    return (
+      capturedRawSyscalls.get("_" + name) ||
+      capturedRawSyscalls.get(name) ||
+      capturedRawSyscalls.get("___" + name)
+    );
+  }
+
+  for (const name of BRIDGED_ENV_SYSCALLS) {
+    const rawFn = findRaw(name);
+    if (!rawFn || !imports.env?.[name]) continue;
+
+    const asyncWrapper = async function (...args: any[]) {
+      const asyncFS = (globalThis as any).Module?.asyncFS;
+      if (asyncFS && asyncFS[name]) {
+        try {
+          return await asyncFS[name](...args);
+        } catch (e) {
+          if ((e as any)?.fallthrough) {
+            return rawFn(...args);
+          }
+          throw e;
+        }
+      }
+      return rawFn(...args);
+    };
+
+    imports.env[name] = new RealSuspending(asyncWrapper);
+  }
+
+  const wasiNs = imports.wasi_snapshot_preview1;
+  if (!wasiNs) return;
+
+  for (const name of BRIDGED_WASI_SYSCALLS) {
+    const rawFn = findRaw(name);
+    if (!rawFn || !wasiNs[name]) continue;
+
+    const asyncWrapper = async function (...args: any[]) {
+      const asyncFS = (globalThis as any).Module?.asyncFS;
+      if (asyncFS && asyncFS[name]) {
+        try {
+          return await asyncFS[name](...args);
+        } catch (e) {
+          if ((e as any)?.fallthrough) {
+            return rawFn(...args);
+          }
+          throw e;
+        }
+      }
+      return rawFn(...args);
+    };
+
+    wasiNs[name] = new RealSuspending(asyncWrapper);
+  }
+}
+
+// ============================================================================
+// Original emscripten-settings.ts code (unchanged except getInstantiateWasmFunc)
+// ============================================================================
+
 /**
  * Get the base settings to use to load Pyodide.
  *
@@ -58,31 +193,12 @@ export function createSettings(
     thisProgram: config._sysExecutable,
     arguments: config.args,
     API,
-    // Emscripten calls locateFile exactly one time with argument
-    // pyodide.asm.wasm to get the URL it should download it from.
-    //
-    // If we set instantiateWasm the return value of locateFile actually is
-    // unused, but Emscripten calls it anyways. We set instantiateWasm except
-    // when compiling with source maps, see comment in getInstantiateWasmFunc().
-    //
-    // It also is called when Emscripten tries to find a dependency of a shared
-    // library but it failed to find it in the file system. But for us that
-    // means dependency resolution has already failed and we want to throw an
-    // error anyways.
     locateFile: (path: string) => config.indexURL + path,
     instantiateWasm: getInstantiateWasmFunc(config.indexURL),
   };
   return settings;
 }
 
-/**
- * Make the home directory inside the virtual file system,
- * then change the working directory to it.
- *
- * @param Module The Emscripten Module.
- * @param path The path to the home directory.
- * @private
- */
 function createHomeDirectory(path: string): PreRunFunc {
   return function (Module) {
     const fallbackPath = "/";
@@ -104,10 +220,6 @@ function setEnvironment(env: { [key: string]: string }): PreRunFunc {
   };
 }
 
-/**
- * Mount local directories to the virtual file system. Only for Node.js.
- * @param mounts The list of paths to mount.
- */
 function callFsInitHook(
   fsInit: undefined | ((fs: FSType, info: { sitePackages: string }) => void),
 ): PreRunFunc[] {
@@ -133,19 +245,7 @@ function computeVersionTuple(Module: PyodideModule): [number, number, number] {
   const micro = (versionInt >>> 8) & 0xff;
   return [major, minor, micro];
 }
-/**
- * Install the Python standard library to the virtual file system.
- *
- * Previously, this was handled by Emscripten's file packager (pyodide.asm.data).
- * However, using the file packager means that we have only one version
- * of the standard library available. We want to be able to use different
- * versions of the standard library, for example:
- *
- * - Use compiled(.pyc) or uncompiled(.py) standard library.
- * - Remove unused modules or add additional modules using bundlers like pyodide-pack.
- *
- * @param stdlibURL The URL for the Python standard library
- */
+
 function installStdlib(stdlibURL: string): PreRunFunc {
   const stdlibPromise: Promise<Uint8Array> = loadBinaryFile(stdlibURL);
   return async (Module: PyodideModule) => {
@@ -168,10 +268,6 @@ function installStdlib(stdlibURL: string): PreRunFunc {
   };
 }
 
-/**
- * Initialize the virtual file system, before loading Python interpreter.
- * @private
- */
 function getFileSystemInitializationFuncs(
   config: PyodideConfigWithDefaults,
 ): PreRunFunc[] {
@@ -196,13 +292,6 @@ function getInstantiateWasmFunc(
 ): EmscriptenSettings["instantiateWasm"] {
   // @ts-ignore
   if (SOURCEMAP || typeof WasmOffsetConverter !== "undefined") {
-    // According to the docs:
-    //
-    // "Sanitizers or source map is currently not supported if overriding
-    // WebAssembly instantiation with Module.instantiateWasm."
-    // https://emscripten.org/docs/api_reference/module.html?highlight=instantiatewasm#Module.instantiateWasm
-    //
-    // typeof WasmOffsetConverter !== "undefined" checks for asan.
     return;
   }
   const { binary, response } = getBinaryResponse(indexURL + "pyodide.asm.wasm");
@@ -219,6 +308,10 @@ function getInstantiateWasmFunc(
         await jsvErrorImportPromise;
       imports.env.Jsv_GetError_import = Jsv_GetError_import;
       imports.env.JsvError_Check = JsvError_Check;
+
+      // JSPI: Replace Suspending-wrapped syscalls with routing wrappers
+      instrumentSyscallImports(imports);
+
       try {
         let res: WebAssembly.WebAssemblyInstantiatedSource;
         if (response) {
@@ -234,6 +327,6 @@ function getInstantiateWasmFunc(
       }
     })();
 
-    return {}; // Compiling asynchronously, no exports.
+    return {};
   };
 }
