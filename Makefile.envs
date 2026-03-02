@@ -192,7 +192,10 @@ export MAIN_MODULE_LDFLAGS= $(LDFLAGS_BASE) \
 	-lsdl.js \
 	--js-library=src/core/libjsverror.js \
 	-sMAX_WEBGL_VERSION=2  \
-	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0
+	-sGL_WORKAROUND_SAFARI_GETCONTEXT_BUG=0 \
+	-sJSPI \
+	-sJSPI_EXPORTS='["main","__main_argc_argv"]' \
+	-sJSPI_IMPORTS='["__syscall_openat","__syscall_stat64","__syscall_fstat64","__syscall_newfstatat","__syscall_fcntl64","__syscall_ioctl","__syscall_faccessat","__syscall_getdents64","__syscall_readlinkat","__syscall_mkdirat","__syscall_unlinkat","__syscall_renameat","__syscall_rmdir","__syscall_chmod","__syscall_fchmod","__syscall_truncate64","__syscall_ftruncate64","fd_read","fd_write","fd_pread","fd_pwrite","fd_seek","fd_close","fd_sync","fd_fdstat_get"]'
 
 EXPORTS=_main \
    ,_free \
@@ -295,7 +298,10 @@ ifeq ($(DISABLE_DYLINK), 1)
 		-lsqlite3 \
 		-lidbfs.js \
 		-lnodefs.js \
-    -lproxyfs.js
+    -lproxyfs.js \
+	-sJSPI \
+	-sJSPI_EXPORTS='["main","__main_argc_argv"]' \
+	-sJSPI_IMPORTS='["__syscall_openat","__syscall_stat64","__syscall_fstat64","__syscall_newfstatat","__syscall_fcntl64","__syscall_ioctl","__syscall_faccessat","__syscall_getdents64","__syscall_readlinkat","__syscall_mkdirat","__syscall_unlinkat","__syscall_renameat","__syscall_rmdir","__syscall_chmod","__syscall_fchmod","__syscall_truncate64","__syscall_ftruncate64","fd_read","fd_write","fd_pread","fd_pwrite","fd_seek","fd_close","fd_sync","fd_fdstat_get"]'
 
 endif
 
