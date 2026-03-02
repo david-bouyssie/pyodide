@@ -776,12 +776,16 @@ API.finalizeBootstrap = function (
   if (snapshotConfig) {
     syncUpSnapshotLoad1();
   }
-  let [err, captured_stderr] = API.rawRun("import _pyodide_core");
-  if (err) {
-    API.fatal_loading_error(
-      "Failed to import _pyodide_core\n",
-      captured_stderr,
-    );
+  // JSPI: _pyodide_core may already be imported by main().
+  // init_pyodide_proxy() sets API._pyodide during PyInit__pyodide_core.
+  if (!API._pyodide) {
+    let [err, captured_stderr] = API.rawRun("import _pyodide_core");
+    if (err) {
+      API.fatal_loading_error(
+        "Failed to import _pyodide_core\n",
+        captured_stderr,
+      );
+    }
   }
 
   // First make internal dict so that we can use runPythonInternal.
