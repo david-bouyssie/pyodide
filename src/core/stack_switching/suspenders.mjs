@@ -58,8 +58,14 @@ export function createPromising(wasm_func) {
  *   enabled (used in callPyObjectKwargsSuspending in pyproxy.ts)
  */
 export function initSuspenders() {
-  promisingApplyHandler = createPromising(wasmExports._pyproxy_apply_promising);
+  // Emscripten's instrumentWasmExports() wraps every export with a JS arrow
+  // function: ret[x] = (...args) => original(...args), storing the raw wasm
+  // function as ret[x].orig. WebAssembly.promising() requires the raw wasm
+  // export, not the JS wrapper.
+  const applyFn = wasmExports._pyproxy_apply_promising;
+  promisingApplyHandler = createPromising(applyFn.orig || applyFn);
   if (wasmExports.run_main_promising) {
-    promisingRunMainHandler = createPromising(wasmExports.run_main_promising);
+    const runMainFn = wasmExports.run_main_promising;
+    promisingRunMainHandler = createPromising(runMainFn.orig || runMainFn);
   }
 }

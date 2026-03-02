@@ -12,7 +12,6 @@ all: \
 	all-but-packages \
 	dist/pyodide-lock.json \
 	dist/pyodide.d.ts \
-	dist/snapshot.bin \
 
 
 all-but-packages: \
