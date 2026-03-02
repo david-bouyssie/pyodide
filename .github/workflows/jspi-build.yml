@@ -23,6 +23,7 @@ jobs:
       EMCC_CORES: 3
       PYODIDE_JOBS: 3
       CCACHE_DIR: /tmp/ccache
+      CONDA_PKGS_DIRS: /home/runner/conda_pkgs_dir
 
     steps:
       - uses: actions/checkout@v6
@@ -37,6 +38,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: npm
+          cache-dependency-path: src/js/package-lock.json
 
       - name: Save Node.js 24 path
         run: echo "NODE24_DIR=$(dirname $(which node))" >> $GITHUB_ENV
@@ -44,6 +47,13 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.21'
+          cache: false
+
+      - name: Restore conda package cache
+        uses: actions/cache@v5
+        with:
+          path: /home/runner/conda_pkgs_dir
+          key: conda-${{ hashFiles('environment.yml') }}-${{ runner.os }}
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -69,7 +79,16 @@ jobs:
           which npm
           which go
 
+      - name: Restore emsdk cache
+        id: emsdk-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: emsdk/emsdk
+          key: emsdk-${{ hashFiles('Makefile.envs', 'emsdk/Makefile', 'emsdk/patches/**') }}-${{ runner.os }}
+
       - name: Build emsdk
+        id: build-emsdk
+        if: steps.emsdk-cache.outputs.cache-hit != 'true'
         shell: bash -l {0}
         run: |
           which ccache
@@ -77,7 +96,18 @@ jobs:
           make -C emsdk
           ccache -s
 
+      - name: Restore cpython cache
+        id: cpython-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            cpython/installs
+            cpython/build
+          key: cpython-${{ hashFiles('Makefile.envs', 'cpython/Makefile', 'cpython/patches/**') }}-${{ runner.os }}
+
       - name: Build CPython
+        id: build-cpython
+        if: steps.cpython-cache.outputs.cache-hit != 'true'
         shell: bash -l {0}
         run: |
           source pyodide_env.sh
@@ -98,6 +128,22 @@ jobs:
       - name: Check size
         shell: bash -l {0}
         run: ls -lh dist/
+
+      - name: Save emsdk cache
+        if: always() && steps.emsdk-cache.outputs.cache-hit != 'true' && steps.build-emsdk.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: emsdk/emsdk
+          key: emsdk-${{ hashFiles('Makefile.envs', 'emsdk/Makefile', 'emsdk/patches/**') }}-${{ runner.os }}
+
+      - name: Save cpython cache
+        if: always() && steps.cpython-cache.outputs.cache-hit != 'true' && steps.build-cpython.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            cpython/installs
+            cpython/build
+          key: cpython-${{ hashFiles('Makefile.envs', 'cpython/Makefile', 'cpython/patches/**') }}-${{ runner.os }}
 
       - name: Save ccache
         uses: actions/cache/save@v5
