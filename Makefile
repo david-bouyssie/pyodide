@@ -128,11 +128,11 @@ dist/pyodide.asm.js: \
    # cat dist/pyodide.asm.js | grep -ohE 'var _{0,5}.' | sort | uniq -c | sort -nr | head -n 20
 	$(SED) -i -E 's/var __Z[^;]*;//g' dist/pyodide.asm.js
 	$(SED) -i '1i "use strict";' dist/pyodide.asm.js
-	# Remove last 7 lines of pyodide.asm.js, see issue #2282
-	# Hopefully we will remove this after emscripten fixes it, upstream issue
-	# emscripten-core/emscripten#16518
-	# Sed nonsense from https://stackoverflow.com/a/13383331
-	$(SED) -i -n -e :a -e '1,7!{P;N;D;};N;ba' dist/pyodide.asm.js
+	# Remove Emscripten's CJS/AMD module export boilerplate, see issue #2282
+	# We replace it with a simple globalThis assignment (line below).
+	# Uses pattern matching instead of removing a fixed number of lines,
+	# since -sJSPI changes the number of trailing lines Emscripten generates.
+	$(SED) -i '/^if.*typeof exports.*typeof module/,/define.*_createPyodideModule/d' dist/pyodide.asm.js
 	echo "globalThis._createPyodideModule = _createPyodideModule;" >> dist/pyodide.asm.js
 
 	@date +"[%F %T] done building pyodide.asm.js."
