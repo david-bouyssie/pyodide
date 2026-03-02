@@ -1,0 +1,87 @@
+name: jspi-build
+
+on:
+  push:
+    branches: [jspi-syscall-poc]
+
+jobs:
+  get_python_version:
+    runs-on: ubuntu-latest
+    outputs:
+      PYVERSION: ${{ steps.get_python_version.outputs.PYVERSION }}
+    steps:
+      - uses: actions/checkout@v6
+      - id: get_python_version
+        run: |
+          echo "PYVERSION=$(git grep 'export PYVERSION ?=' Makefile.envs | cut -d' ' -f4)" >> "$GITHUB_OUTPUT"
+
+  build-core:
+    runs-on: ubuntu-latest
+    needs: [get_python_version]
+    env:
+      EMSDK_NUM_CORES: 3
+      EMCC_CORES: 3
+      PYODIDE_JOBS: 3
+      CCACHE_DIR: /tmp/ccache
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/cache@v5
+        with:
+          path: /tmp/ccache
+          key: ${{ hashFiles('Makefile.envs') }}-${{ runner.os }}-jspi-
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.21'
+
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: pyodide-env
+          environment-file: environment.yml
+          channels: conda-forge
+
+      - name: Install dependencies
+        shell: bash -l {0}
+        run: |
+          sudo apt install -y build-essential git xxd
+          pip install -r requirements.txt
+
+      - name: Build emsdk
+        shell: bash -l {0}
+        run: |
+          which ccache
+          ccache -z
+          make -C emsdk
+          ccache -s
+
+      - name: Build CPython
+        shell: bash -l {0}
+        run: |
+          source pyodide_env.sh
+          which ccache
+          ccache -z
+          make -C cpython
+          ccache -s
+
+      - name: Build Pyodide core
+        shell: bash -l {0}
+        run: |
+          source pyodide_env.sh
+          ccache -z
+          PYODIDE_PACKAGES="tag:core" make -j3
+          ccache -s
+
+      - name: Check size
+        shell: bash -l {0}
+        run: ls -lh dist/
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v6
+        with:
+          name: jspi-dist
+          path: ./dist/
+          retention-days: 30
