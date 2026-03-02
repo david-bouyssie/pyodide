@@ -48,6 +48,36 @@ finally:
 PyObject*
 PyInit__pyodide_core(void);
 
+/*
+ * Pre-import all Python modules that finalizeBootstrap would otherwise import
+ * from JavaScript. This ensures all file I/O (.pyc reads, stdlib zip reads)
+ * happens inside main(), which is wrapped with WebAssembly.promising() when
+ * built with -sJSPI. Without this, the imports happen via rawRun() and
+ * PyProxy.__pyproxy_apply calls from JS — non-promising WASM entry points
+ * that crash if they hit Suspending-wrapped syscall imports.
+ */
+static int
+preimport_bootstrap_modules(void)
+{
+  return PyRun_SimpleString(
+    "import _pyodide_core\n"
+    "import importlib\n"
+    "import sys\n"
+    "import os\n"
+    "import builtins\n"
+    "import __main__\n"
+    "try:\n"
+    "    import pyodide\n"
+    "    import pyodide.code\n"
+    "    import pyodide.ffi\n"
+    "    import pyodide._package_loader\n"
+    "    import _pyodide._base\n"
+    "    import _pyodide._importhook\n"
+    "except ImportError:\n"
+    "    pass  # Will be imported later via promising path\n"
+  );
+}
+
 /**
  * Bootstrap steps here:
  *  1. Import _pyodide package (we depend on this in _pyodide_core)
@@ -57,6 +87,10 @@ PyInit__pyodide_core(void);
  *     call into _pyodide._base.eval_code and
  *     _pyodide._import_hook.register_js_finder (this happens in loadPyodide in
  *     pyodide.js)
+ *
+ * JSPI NOTE: When built with -sJSPI, Emscripten wraps main() with
+ * WebAssembly.promising() and awaits it. All file I/O syscalls triggered
+ * during main() can safely hit Suspending-wrapped imports.
  */
 int
 main(int argc, char** argv)
@@ -65,6 +99,15 @@ main(int argc, char** argv)
   // no status code to check.
   PyImport_AppendInittab("_pyodide_core", PyInit__pyodide_core);
   initialize_python(argc, argv);
+
+  // Pre-import all bootstrap modules while inside the promising main() frame.
+  int rc = preimport_bootstrap_modules();
+  if (rc != 0) {
+    fprintf(stderr,
+      "Pyodide: warning: preimport_bootstrap_modules failed (rc=%d). "
+      "Bootstrap will retry imports from JS.\n", rc);
+  }
+
   // Normally the runtime would exit when main() returns, don't let that
   // happen.
   emscripten_runtime_keepalive_push();
