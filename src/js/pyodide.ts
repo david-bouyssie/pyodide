@@ -10,7 +10,10 @@ import {
   calculateInstallBaseUrl,
 } from "./compat";
 
-import { createSettings } from "./emscripten-settings";
+import {
+  createSettings,
+  installSuspendingMonkeyPatch,
+} from "./emscripten-settings";
 import { version as version_ } from "./version";
 
 import type { PyodideAPI } from "./api.js";
@@ -365,6 +368,8 @@ async function prepareSnapshot(
 async function createPyodideModule(
   emscriptenSettings: EmscriptenSettings,
 ): Promise<PyodideModule> {
+  // JSPI: capture raw syscall functions before Emscripten wraps them
+  installSuspendingMonkeyPatch();
   // _createPyodideModule is specified in the Makefile by the linker flag:
   // `-s EXPORT_NAME="'_createPyodideModule'"`
   const module = await _createPyodideModule(emscriptenSettings);
