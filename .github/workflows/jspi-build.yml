@@ -29,11 +29,10 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: actions/cache@v5
+      - uses: actions/cache/restore@v5
         with:
           path: /tmp/ccache
           key: ${{ hashFiles('Makefile.envs') }}-${{ runner.os }}-jspi-
-          save-always: true
 
       - uses: actions/setup-node@v4
         with:
@@ -99,6 +98,13 @@ jobs:
       - name: Check size
         shell: bash -l {0}
         run: ls -lh dist/
+
+      - name: Save ccache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          path: /tmp/ccache
+          key: ${{ hashFiles('Makefile.envs') }}-${{ runner.os }}-jspi-
 
       - name: Upload dist
         uses: actions/upload-artifact@v6
