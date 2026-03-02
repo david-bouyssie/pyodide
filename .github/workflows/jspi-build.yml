@@ -23,7 +23,6 @@ jobs:
       EMCC_CORES: 3
       PYODIDE_JOBS: 3
       CCACHE_DIR: /tmp/ccache
-      CONDA_PKGS_DIRS: /home/runner/conda_pkgs_dir
 
     steps:
       - uses: actions/checkout@v6
@@ -49,11 +48,12 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Restore conda package cache
-        uses: actions/cache@v5
+      - name: Restore conda env cache
+        id: conda-cache
+        uses: actions/cache/restore@v5
         with:
-          path: /home/runner/conda_pkgs_dir
-          key: conda-${{ hashFiles('environment.yml') }}-${{ runner.os }}
+          path: /usr/share/miniconda/envs/pyodide-env
+          key: conda-env-${{ hashFiles('environment.yml') }}-${{ runner.os }}
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -128,6 +128,13 @@ jobs:
       - name: Check size
         shell: bash -l {0}
         run: ls -lh dist/
+
+      - name: Save conda env cache
+        if: always() && steps.conda-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: /usr/share/miniconda/envs/pyodide-env
+          key: conda-env-${{ hashFiles('environment.yml') }}-${{ runner.os }}
 
       - name: Save emsdk cache
         if: always() && steps.emsdk-cache.outputs.cache-hit != 'true' && steps.build-emsdk.outcome == 'success'
