@@ -2,7 +2,7 @@ name: jspi-build
 
 on:
   push:
-    branches: [jspi-syscall-poc]
+    branches: [jspi-syscall-poc, claude/**]
 
 jobs:
   get_python_version:
