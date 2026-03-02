@@ -33,6 +33,7 @@ jobs:
         with:
           path: /tmp/ccache
           key: ${{ hashFiles('Makefile.envs') }}-${{ runner.os }}-jspi-
+          save-always: true
 
       - uses: actions/setup-go@v6
         with:
