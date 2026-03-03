@@ -35,6 +35,7 @@ export function createPromising(wasm_func) {
       try {
         return await promisingFunc(null, ...args);
       } finally {
+        Module._ensure_gil();
         validSuspender.value = orig;
       }
     }
