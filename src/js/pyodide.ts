@@ -370,9 +370,28 @@ async function createPyodideModule(
 ): Promise<PyodideModule> {
   // JSPI: capture raw syscall functions before Emscripten wraps them
   installSuspendingMonkeyPatch();
+
+  // With JSPI, main() is wrapped with WebAssembly.promising() and returns a
+  // Promise. Emscripten's runtime calls main() fire-and-forget during module
+  // init without awaiting it, so main() hasn't completed by the time the
+  // factory resolves. Prevent auto-run and await main() explicitly instead.
+  const jspi =
+    typeof WebAssembly !== "undefined" && "Suspending" in WebAssembly;
+  const needsExplicitMain = jspi && !emscriptenSettings.noInitialRun;
+  if (needsExplicitMain) {
+    emscriptenSettings.noInitialRun = true;
+  }
+
   // _createPyodideModule is specified in the Makefile by the linker flag:
   // `-s EXPORT_NAME="'_createPyodideModule'"`
   const module = await _createPyodideModule(emscriptenSettings);
+
+  // Now explicitly call main() and await its promising-wrapped Promise.
+  // This ensures preimport_bootstrap_modules() completes and API._pyodide
+  // is set before finalizeBootstrap runs.
+  if (needsExplicitMain) {
+    await module._main();
+  }
 
   // Handle early exit
   if (emscriptenSettings.exitCode !== undefined) {

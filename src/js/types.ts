@@ -331,6 +331,7 @@ export interface PyodideModule extends PythonModule {
   handle_js_error(e: any): void;
   _print_stdout: (ptr: number) => void;
   _print_stderr: (ptr: number) => void;
+  _main: (argc?: number, argv?: number) => number | Promise<number>;
   getPromise(p: number): Promise<any>;
 }
 
