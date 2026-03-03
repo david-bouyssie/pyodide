@@ -59,23 +59,46 @@ PyInit__pyodide_core(void);
 static int
 preimport_bootstrap_modules(void)
 {
-  return PyRun_SimpleString(
+  int rc = PyRun_SimpleString(
+    // Phase 1: core modules (always available)
     "import _pyodide_core\n"
     "import importlib\n"
+    "import importlib.abc\n"
+    "import importlib.metadata\n"
     "import sys\n"
     "import os\n"
     "import builtins\n"
     "import __main__\n"
+    "import pathlib\n"
+    "\n"
+    // Phase 2: pyodide modules (may not exist in bare builds)
     "try:\n"
+    "    import _pyodide\n"
+    "    import _pyodide._base\n"
+    "    import _pyodide._importhook\n"
     "    import pyodide\n"
     "    import pyodide.code\n"
     "    import pyodide.ffi\n"
     "    import pyodide._package_loader\n"
-    "    import _pyodide._base\n"
-    "    import _pyodide._importhook\n"
     "except ImportError:\n"
-    "    pass  # Will be imported later via promising path\n"
+    "    pass\n"
+    "\n"
+    // Phase 3: warm up non-import code paths
+    "try:\n"
+    "    from _pyodide._base import eval_code as _ec\n"
+    "    _ec('{}')\n"
+    "    del _ec\n"
+    "    importlib.import_module('sys')\n"
+    "    importlib.import_module('os')\n"
+    "    importlib.import_module('builtins')\n"
+    "    importlib.import_module('__main__')\n"
+    "    _ = pyodide._package_loader.SITE_PACKAGES\n"
+    "    _ = pyodide._package_loader.DSO_DIR\n"
+    "    del _\n"
+    "except Exception:\n"
+    "    pass\n"
   );
+  return rc;
 }
 
 /**
