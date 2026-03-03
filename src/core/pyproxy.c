@@ -28,6 +28,11 @@ EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
+    PyThreadState *current = PyThreadState_GetUnchecked();
+    PyThreadState *expected = PyGILState_GetThisThreadState();
+    fprintf(stderr,
+            "GIL check failed: current_tstate=%p, expected(autoTSS)=%p\n",
+            (void *)current, (void *)expected);
     throw_no_gil();
   }
 }
