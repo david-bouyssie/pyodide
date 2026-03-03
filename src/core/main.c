@@ -170,16 +170,37 @@ run_main_promising(JsVal suspender)
   return run_main();
 }
 
+EM_JS(void, log_ensure_gil, (int before, int after, int tss), {
+  console.error(
+    "ensure_gil: before=0x" + before.toString(16) +
+    ", after=0x" + after.toString(16) +
+    ", tss=0x" + tss.toString(16)
+  );
+});
+
 /**
  * Re-acquire the GIL after main()'s promising frame has unwound.
  *
  * With JSPI, main() runs inside a WebAssembly.promising() wrapper. When it
  * returns and the Promise resolves, the wasm stack unwinds and CPython's
- * _PyRuntime.gilstate.tstate_current becomes NULL. PyGILState_Ensure() finds
- * the TSS-stored thread state and reinstalls it as current.
+ * _PyRuntime.gilstate.tstate_current becomes NULL.
+ *
+ * PyGILState_Ensure() won't work here because it may create a new thread
+ * state instead of restoring the original one, causing PyGILState_Check()
+ * to fail later. Instead, we use PyEval_RestoreThread() with the TSS-stored
+ * thread state (the original one from Py_Initialize) to acquire the GIL and
+ * set tstate_current to the correct value.
  */
 EMSCRIPTEN_KEEPALIVE void
 ensure_gil(void)
 {
-  PyGILState_Ensure();
+  PyThreadState *tstate = PyGILState_GetThisThreadState();
+  PyThreadState *before = PyThreadState_GetUnchecked();
+  if (tstate && !before) {
+    PyEval_RestoreThread(tstate);
+  }
+  PyThreadState *after = PyThreadState_GetUnchecked();
+  log_ensure_gil((int)(uintptr_t)before,
+                 (int)(uintptr_t)after,
+                 (int)(uintptr_t)tstate);
 }
