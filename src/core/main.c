@@ -169,3 +169,17 @@ run_main_promising(JsVal suspender)
   set_suspender(suspender);
   return run_main();
 }
+
+/**
+ * Re-acquire the GIL after main()'s promising frame has unwound.
+ *
+ * With JSPI, main() runs inside a WebAssembly.promising() wrapper. When it
+ * returns and the Promise resolves, the wasm stack unwinds and CPython's
+ * _PyRuntime.gilstate.tstate_current becomes NULL. PyGILState_Ensure() finds
+ * the TSS-stored thread state and reinstalls it as current.
+ */
+EMSCRIPTEN_KEEPALIVE void
+ensure_gil(void)
+{
+  PyGILState_Ensure();
+}

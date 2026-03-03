@@ -332,6 +332,7 @@ export interface PyodideModule extends PythonModule {
   _print_stdout: (ptr: number) => void;
   _print_stderr: (ptr: number) => void;
   _main: (argc?: number, argv?: number) => number | Promise<number>;
+  _ensure_gil: () => void;
   jspiSupported: boolean;
   callPyObject: (ptrobj: number, jsargs: any) => any;
   callPyObjectMaybePromising: (ptrobj: number, jsargs: any) => Promise<any>;
