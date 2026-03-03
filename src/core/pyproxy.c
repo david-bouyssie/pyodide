@@ -38,9 +38,16 @@ EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
+    // In JSPI mode, promising calls can leave tstate_current NULL after
+    // the wasm stack unwinds. Try to restore from TSS before giving up.
+    PyThreadState *tstate = PyGILState_GetThisThreadState();
+    if (tstate) {
+      PyEval_RestoreThread(tstate);
+      return;  // fixed, continue normally
+    }
+    // TSS is also NULL — this is a real bug, not a JSPI artifact
     PyThreadState *current = PyThreadState_GetUnchecked();
-    PyThreadState *expected = PyGILState_GetThisThreadState();
-    log_gil_failure((int)(uintptr_t)current, (int)(uintptr_t)expected);
+    log_gil_failure((int)(uintptr_t)current, (int)(uintptr_t)tstate);
     throw_no_gil();
   }
 }
