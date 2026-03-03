@@ -332,6 +332,9 @@ export interface PyodideModule extends PythonModule {
   _print_stdout: (ptr: number) => void;
   _print_stderr: (ptr: number) => void;
   _main: (argc?: number, argv?: number) => number | Promise<number>;
+  jspiSupported: boolean;
+  callPyObject: (ptrobj: number, jsargs: any) => any;
+  callPyObjectMaybePromising: (ptrobj: number, jsargs: any) => Promise<any>;
   getPromise(p: number): Promise<any>;
 }
 
@@ -541,7 +544,7 @@ export interface API {
   finalizeBootstrap: (
     fromSnapshot?: SnapshotConfig,
     snapshotDeserializer?: (obj: any) => any,
-  ) => PyodideAPI;
+  ) => Promise<PyodideAPI>;
   syncUpSnapshotLoad3(conf: SnapshotConfig): void;
   abortSignalAny: (signals: AbortSignal[]) => AbortSignal;
   version: string;

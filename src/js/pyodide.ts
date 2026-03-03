@@ -439,11 +439,11 @@ If you updated the Pyodide version, make sure you also updated the 'indexURL' pa
 /**
  * @private
  */
-function bootstrapPyodide(
+async function bootstrapPyodide(
   pyodideModule: PyodideModule,
   snapshot: Uint8Array | undefined,
   config: PyodideConfigWithDefaults,
-): PyodideAPI {
+): Promise<PyodideAPI> {
   const API = pyodideModule.API;
 
   let snapshotConfig: SnapshotConfig | undefined = undefined;
@@ -452,7 +452,7 @@ function bootstrapPyodide(
   }
 
   // runPython works starting after the call to finalizeBootstrap.
-  const pyodide = API.finalizeBootstrap(
+  const pyodide = await API.finalizeBootstrap(
     snapshotConfig,
     config._snapshotDeserializer,
   );
@@ -517,7 +517,7 @@ export async function loadPyodide(
   configureAPI(pyodideModule, config);
 
   // Stage 7: Bootstrap Python interpreter
-  const pyodide = bootstrapPyodide(pyodideModule, snapshot, config);
+  const pyodide = await bootstrapPyodide(pyodideModule, snapshot, config);
 
   // Stage 8: Finalize setup and initialize streams
   return await finalizeSetup(pyodide, config);
