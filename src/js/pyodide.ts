@@ -393,6 +393,14 @@ async function createPyodideModule(
     await module._main();
   }
 
+  // In JSPI mode, permanently route all callPyObject invocations through the
+  // promising-wrapped path so any JS→wasm call can safely suspend for I/O.
+  // At this point initSuspenders has completed (preRun callback), so the
+  // promising handlers are ready.
+  if (module.jspiSupported) {
+    module.callPyObject = module.callPyObjectMaybePromising;
+  }
+
   // Handle early exit
   if (emscriptenSettings.exitCode !== undefined) {
     throw new module.ExitStatus(emscriptenSettings.exitCode);
@@ -469,9 +477,9 @@ async function finalizeSetup(
 ): Promise<PyodideAPI> {
   const API = (pyodide as any)._api;
 
-  API.sys.path.insert(0, "");
+  await API.sys.path.insert(0, "");
 
-  API._pyodide.set_excepthook();
+  await API._pyodide.set_excepthook();
   await API.packageIndexReady;
 
   // I think we want this initializeStreams call to happen after

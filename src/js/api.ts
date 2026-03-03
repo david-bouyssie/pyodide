@@ -773,103 +773,86 @@ API.finalizeBootstrap = async function (
   snapshotConfig?: SnapshotConfig,
   snapshotDeserializer?: (obj: any) => any,
 ): Promise<PyodideAPI> {
-  // For JSPI: route all PyProxy calls through promising-wrapped wasm entry
-  // points so that any file I/O during bootstrap can safely suspend.
-  let restoreCallPyObject: (() => void) | null = null;
-  if (Module.jspiSupported) {
-    const orig = Module.callPyObject;
-    Module.callPyObject = Module.callPyObjectMaybePromising;
-    restoreCallPyObject = () => {
-      Module.callPyObject = orig;
-    };
+  if (snapshotConfig) {
+    syncUpSnapshotLoad1();
+  }
+  // JSPI: _pyodide_core may already be imported by main().
+  // init_pyodide_proxy() sets API._pyodide during PyInit__pyodide_core.
+  if (!API._pyodide) {
+    if (Module.jspiSupported) {
+      throw new Error(
+        "JSPI: API._pyodide should be set after awaiting main(). " +
+          "Cannot use rawRun with JSPI-wrapped syscalls.",
+      );
+    }
+    let [err, captured_stderr] = API.rawRun("import _pyodide_core");
+    if (err) {
+      API.fatal_loading_error(
+        "Failed to import _pyodide_core\n",
+        captured_stderr,
+      );
+    }
   }
 
-  try {
-    if (snapshotConfig) {
-      syncUpSnapshotLoad1();
-    }
-    // JSPI: _pyodide_core may already be imported by main().
-    // init_pyodide_proxy() sets API._pyodide during PyInit__pyodide_core.
-    if (!API._pyodide) {
-      if (Module.jspiSupported) {
-        throw new Error(
-          "JSPI: API._pyodide should be set after awaiting main(). " +
-            "Cannot use rawRun with JSPI-wrapped syscalls.",
-        );
-      }
-      let [err, captured_stderr] = API.rawRun("import _pyodide_core");
-      if (err) {
-        API.fatal_loading_error(
-          "Failed to import _pyodide_core\n",
-          captured_stderr,
-        );
-      }
-    }
+  // First make internal dict so that we can use runPythonInternal.
+  // runPythonInternal uses a separate namespace, so we don't pollute the main
+  // environment with variables from our setup.
+  API.runPythonInternal_dict = (await API._pyodide._base.eval_code(
+    "{}",
+  )) as PyProxy;
+  API.importlib = await API.runPythonInternal("import importlib; importlib");
+  let import_module = API.importlib.import_module;
 
-    // First make internal dict so that we can use runPythonInternal.
-    // runPythonInternal uses a separate namespace, so we don't pollute the main
-    // environment with variables from our setup.
-    API.runPythonInternal_dict = (await API._pyodide._base.eval_code(
-      "{}",
-    )) as PyProxy;
-    API.importlib = await API.runPythonInternal(
-      "import importlib; importlib",
-    );
-    let import_module = API.importlib.import_module;
+  API.sys = await import_module("sys");
+  API.os = await import_module("os");
 
-    API.sys = await import_module("sys");
-    API.os = await import_module("os");
+  // Set up globals
+  let globals = (await API.runPythonInternal(
+    "import __main__; __main__.__dict__",
+  )) as PyDict;
+  let builtins = (await API.runPythonInternal(
+    "import builtins; builtins.__dict__",
+  )) as PyDict;
+  API.globals = wrapPythonGlobals(globals, builtins);
 
-    // Set up globals
-    let globals = (await API.runPythonInternal(
-      "import __main__; __main__.__dict__",
-    )) as PyDict;
-    let builtins = (await API.runPythonInternal(
-      "import builtins; builtins.__dict__",
-    )) as PyDict;
-    API.globals = wrapPythonGlobals(globals, builtins);
-
-    // Set up key Javascript modules.
-    let importhook = API._pyodide._importhook;
-    let pyodide = makePublicAPI();
-    if (API.config._makeSnapshot) {
-      API.config.jsglobals = makeGlobalsProxy(API.config.jsglobals);
-    }
-    const jsglobals = API.config.jsglobals;
-    if (snapshotConfig) {
-      syncUpSnapshotLoad2(jsglobals, snapshotConfig, snapshotDeserializer);
-    } else {
-      await importhook.register_js_finder();
-      await importhook.register_js_module("js", jsglobals);
-      await importhook.register_js_module("pyodide_js", pyodide);
-      await importhook.register_windows_finder();
-    }
-
-    // import pyodide_py. We want to ensure that as much stuff as possible is
-    // already set up before importing pyodide_py to simplify development of
-    // pyodide_py code (Otherwise it's very hard to keep track of which things
-    // aren't set up yet.)
-    API.pyodide_py = await import_module("pyodide");
-    API.pyodide_code = await import_module("pyodide.code");
-    API.pyodide_ffi = await import_module("pyodide.ffi");
-    API.package_loader = await import_module("pyodide._package_loader");
-    API.pyodide_base = await import_module("_pyodide._base");
-
-    API.sitepackages = await API.package_loader.SITE_PACKAGES.__str__();
-    API.dsodir = await API.package_loader.DSO_DIR.__str__();
-    API.defaultLdLibraryPath = [API.dsodir, API.sitepackages];
-
-    await API.os.environ.__setitem__(
-      "LD_LIBRARY_PATH",
-      API.defaultLdLibraryPath.join(":"),
-    );
-
-    // copy some last constants onto public API.
-    pyodide.pyodide_py = API.pyodide_py;
-    pyodide.globals = API.globals;
-    bootstrapFinalized!();
-    return pyodide;
-  } finally {
-    restoreCallPyObject?.();
+  // Set up key Javascript modules.
+  let importhook = API._pyodide._importhook;
+  let pyodide = makePublicAPI();
+  if (API.config._makeSnapshot) {
+    API.config.jsglobals = makeGlobalsProxy(API.config.jsglobals);
   }
+  const jsglobals = API.config.jsglobals;
+  if (snapshotConfig) {
+    syncUpSnapshotLoad2(jsglobals, snapshotConfig, snapshotDeserializer);
+  } else {
+    await importhook.register_js_finder();
+    await importhook.register_js_module("js", jsglobals);
+    await importhook.register_js_module("pyodide_js", pyodide);
+    await importhook.register_windows_finder();
+  }
+
+  // import pyodide_py. We want to ensure that as much stuff as possible is
+  // already set up before importing pyodide_py to simplify development of
+  // pyodide_py code (Otherwise it's very hard to keep track of which things
+  // aren't set up yet.)
+  API.pyodide_py = await import_module("pyodide");
+  API.pyodide_code = await import_module("pyodide.code");
+  API.pyodide_ffi = await import_module("pyodide.ffi");
+  API.package_loader = await import_module("pyodide._package_loader");
+  API.pyodide_base = await import_module("_pyodide._base");
+
+  API.sitepackages = await API.package_loader.SITE_PACKAGES.__str__();
+  API.dsodir = await API.package_loader.DSO_DIR.__str__();
+  API.defaultLdLibraryPath = [API.dsodir, API.sitepackages];
+
+  await API.os.environ.__setitem__(
+    "LD_LIBRARY_PATH",
+    API.defaultLdLibraryPath.join(":"),
+  );
+
+  // copy some last constants onto public API.
+  pyodide.pyodide_py = API.pyodide_py;
+  pyodide.globals = API.globals;
+  bootstrapFinalized!();
+  return pyodide;
 };
