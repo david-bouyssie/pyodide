@@ -24,18 +24,32 @@ EM_JS(void, throw_no_gil, (), {
   throw new API.NoGilError("Attempted to use PyProxy when Python GIL not held");
 });
 
+EM_JS(void, log_check_gil, (int current, int tss, int healed), {
+  console.error(
+    "check_gil: current=0x" + current.toString(16) +
+    ", tss=0x" + tss.toString(16) +
+    ", healed=" + !!healed
+  );
+});
+
 EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
-    // In JSPI mode, promising calls can leave tstate_current NULL after
-    // the wasm stack unwinds. Restore it directly without going through
-    // GIL mutex (which crashes in single-threaded wasm).
-    PyThreadState *tstate = PyGILState_GetThisThreadState();
-    if (tstate) {
-      PyThreadState_Swap(tstate);
-      return;
+    PyThreadState *current = PyThreadState_GetUnchecked();
+    if (!current) {
+      // JSPI promising unwind left tstate_current NULL. Restore from TSS.
+      PyThreadState *tss = PyGILState_GetThisThreadState();
+      if (tss) {
+        PyThreadState_Swap(tss);
+        log_check_gil((int)(uintptr_t)current,
+                      (int)(uintptr_t)tss, 1);
+        return;
+      }
     }
+    PyThreadState *tss = PyGILState_GetThisThreadState();
+    log_check_gil((int)(uintptr_t)current,
+                  (int)(uintptr_t)tss, 0);
     throw_no_gil();
   }
 }
