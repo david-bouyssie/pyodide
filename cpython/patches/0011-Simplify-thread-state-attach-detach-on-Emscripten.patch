@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Pyodide <pyodide@pyodide.org>
+Date: Tue, 4 Mar 2026 00:00:00 +0000
+Subject: [PATCH 11/11] Simplify thread state attach/detach on Emscripten
+
+On single-threaded Emscripten/WASM, the full thread state attach/detach
+machinery (_PyEval_AcquireLock, _PyEval_ReleaseLock, tstate_try_attach,
+_Py_qsbr_attach/detach, critical sections, etc.) corrupts the wasm
+stack when running under JSPI (JavaScript Promise Integration / WebAssembly
+stack switching). Since there is physically only one thread, all the
+synchronization is unnecessary. Simplify to just setting/clearing the
+fast thread-local pointer, the active flag, and the state field.
+---
+ Python/pystate.c | 24 ++++++++++++++++++++++++
+ 1 file changed, 24 insertions(+)
+
+diff --git a/Python/pystate.c b/Python/pystate.c
+--- a/Python/pystate.c
++++ b/Python/pystate.c
+@@ -2073,6 +2073,18 @@ void
+ _PyThreadState_Attach(PyThreadState *tstate)
+ {
++#ifdef __EMSCRIPTEN__
++    // On single-threaded Emscripten/WASM, the full attach/detach/lock
++    // machinery corrupts the wasm stack under JSPI (WebAssembly stack
++    // switching). Since there is only one thread, skip all locking and
++    // just set the thread-local pointer directly.
++    _Py_EnsureTstateNotNULL(tstate);
++    if (current_fast_get() == NULL) {
++        current_fast_set(&_PyRuntime, tstate);
++    }
++    tstate->state = _Py_THREAD_ATTACHED;
++    tstate->_status.active = 1;
++    return;
++#endif
+ #if defined(Py_DEBUG)
+     // This is called from PyEval_RestoreThread(). Similar
+     // to it, we need to ensure errno doesn't change.
+@@ -2126,6 +2138,18 @@ _PyThreadState_Attach(PyThreadState *tstate)
+ static void
+ detach_thread(PyThreadState *tstate, int detached_state)
+ {
++#ifdef __EMSCRIPTEN__
++    // On single-threaded Emscripten/WASM, skip all synchronization.
++    // Just clear the active flag, set the detached state, and clear
++    // the thread-local pointer.
++    tstate->_status.active = 0;
++#ifdef Py_GIL_DISABLED
++    _Py_atomic_store_int(&tstate->state, detached_state);
++#else
++    tstate->state = detached_state;
++#endif
++    current_fast_clear(&_PyRuntime);
++    return;
++#endif
+     // XXX assert(tstate_is_alive(tstate) && tstate_is_bound(tstate));
+     assert(_Py_atomic_load_int_relaxed(&tstate->state) == _Py_THREAD_ATTACHED);
+     assert(tstate == current_fast_get());
