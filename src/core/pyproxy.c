@@ -24,10 +24,19 @@ EM_JS(void, throw_no_gil, (), {
   throw new API.NoGilError("Attempted to use PyProxy when Python GIL not held");
 });
 
+extern __thread PyThreadState *_Py_tss_tstate;
+
 EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
+    if (!_Py_tss_tstate) {
+      PyThreadState *tss = PyGILState_GetThisThreadState();
+      if (tss) {
+        _Py_tss_tstate = tss;
+        return;
+      }
+    }
     throw_no_gil();
   }
 }
