@@ -24,30 +24,18 @@ EM_JS(void, throw_no_gil, (), {
   throw new API.NoGilError("Attempted to use PyProxy when Python GIL not held");
 });
 
-// Use EM_JS for diagnostic logging instead of fprintf, because in JSPI mode
-// fprintf(stderr, ...) goes through a Suspending-wrapped write syscall which
-// crashes with SuspendError when called from a non-promising entry point.
-EM_JS(void, log_gil_failure, (int current, int expected), {
-  console.error(
-    "GIL check failed: current_tstate=0x" + current.toString(16) +
-    ", expected(autoTSS)=0x" + expected.toString(16)
-  );
-});
-
 EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
     // In JSPI mode, promising calls can leave tstate_current NULL after
-    // the wasm stack unwinds. Try to restore from TSS before giving up.
+    // the wasm stack unwinds. Restore it directly without going through
+    // GIL mutex (which crashes in single-threaded wasm).
     PyThreadState *tstate = PyGILState_GetThisThreadState();
     if (tstate) {
-      PyEval_RestoreThread(tstate);
-      return;  // fixed, continue normally
+      PyThreadState_Swap(tstate);
+      return;
     }
-    // TSS is also NULL — this is a real bug, not a JSPI artifact
-    PyThreadState *current = PyThreadState_GetUnchecked();
-    log_gil_failure((int)(uintptr_t)current, (int)(uintptr_t)tstate);
     throw_no_gil();
   }
 }

@@ -391,10 +391,6 @@ async function createPyodideModule(
   // is set before finalizeBootstrap runs.
   if (needsExplicitMain) {
     await module._main();
-    // Re-acquire GIL: main()'s promising frame has unwound, leaving
-    // _PyRuntime.gilstate.tstate_current as NULL. PyGILState_Ensure()
-    // finds the TSS-stored thread state and reinstalls it as current.
-    module._ensure_gil();
   }
 
   // In JSPI mode, permanently route all callPyObject invocations through the
