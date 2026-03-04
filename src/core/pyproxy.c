@@ -24,37 +24,10 @@ EM_JS(void, throw_no_gil, (), {
   throw new API.NoGilError("Attempted to use PyProxy when Python GIL not held");
 });
 
-// Direct access to CPython's thread-local current tstate pointer.
-// On single-threaded Emscripten/wasm, __thread is a plain global.
-// We write this directly to bypass CPython 3.13's _PyThreadState_Attach
-// / _PyThreadState_Detach / GIL lock machinery, which corrupts the
-// stack in JSPI mode.
-extern __thread PyThreadState *_Py_tss_tstate;
-
-EM_JS(void, log_check_gil, (int current, int tss, int healed), {
-  console.error(
-    "check_gil: current=0x" + current.toString(16) +
-    ", tss=0x" + tss.toString(16) +
-    ", healed=" + !!healed
-  );
-});
-
 EMSCRIPTEN_KEEPALIVE void
 check_gil()
 {
   if (!PyGILState_Check()) {
-    PyThreadState *current = _Py_tss_tstate;
-    if (!current) {
-      PyThreadState *tss = PyGILState_GetThisThreadState();
-      if (tss) {
-        _Py_tss_tstate = tss;
-        log_check_gil(0, (int)(uintptr_t)tss, 1);
-        return;
-      }
-    }
-    PyThreadState *tss = PyGILState_GetThisThreadState();
-    log_check_gil((int)(uintptr_t)current,
-                  (int)(uintptr_t)tss, 0);
     throw_no_gil();
   }
 }

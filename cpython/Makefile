@@ -218,6 +218,7 @@ $(PYBUILD)/Makefile: $(PYBUILD)/.patched
 			  --without-pymalloc \
 			  --disable-shared \
 			  --disable-ipv6 \
+			  --disable-gil \
 			  --enable-big-digits=30 \
 			  --enable-optimizations \
 			  --host=wasm32-unknown-emscripten\

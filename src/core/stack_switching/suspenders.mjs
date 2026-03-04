@@ -35,9 +35,6 @@ export function createPromising(wasm_func) {
       try {
         return await promisingFunc(null, ...args);
       } finally {
-        console.error("createPromising finally: about to restore_tss_tstate");
-        Module._restore_tss_tstate();
-        console.error("createPromising finally: restore_tss_tstate done");
         validSuspender.value = orig;
       }
     }
