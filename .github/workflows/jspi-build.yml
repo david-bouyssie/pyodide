@@ -29,6 +29,36 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Patch pyodide-build for free-threaded (nogil) ABI
+        shell: python3 {0}
+        run: |
+          import pathlib
+          # Add cp313t ABI tags to pyodide_tags_() so find_matching_wheel
+          # can match wheels built by the free-threaded (--disable-gil) CPython.
+
+          # 1. build_env.py: add cp313t tags after cpython_tags() yield
+          f = pathlib.Path("pyodide-build/pyodide_build/build_env.py")
+          src = f.read_text()
+          old = "    yield from cpython_tags(platforms=PLATFORMS, python_version=python_version)"
+          inject = (
+              '\n    # Free-threaded (nogil) builds produce cp313t ABI tags'
+              '\n    abi_tag = f"cp{PYMAJOR}{PYMINOR}t"'
+              '\n    for plat in PLATFORMS:'
+              '\n        yield Tag(interpreter=f"cp{PYMAJOR}{PYMINOR}", abi=abi_tag, platform=plat)'
+          )
+          assert old in src, "Could not find cpython_tags line in build_env.py"
+          f.write_text(src.replace(old, old + inject, 1))
+          print("Patched build_env.py")
+
+          # 2. builder.py: add 't' to retag ABI for cpython_module packages
+          f = pathlib.Path("pyodide-build/pyodide_build/recipe/builder.py")
+          src = f.read_text()
+          old = 'abi = f"cp{get_pyversion_major()}{get_pyversion_minor()}"'
+          new = 'abi = f"cp{get_pyversion_major()}{get_pyversion_minor()}t"'
+          assert old in src, "Could not find retag ABI line in builder.py"
+          f.write_text(src.replace(old, new, 1))
+          print("Patched builder.py")
+
       - uses: actions/cache/restore@v5
         with:
           path: /tmp/ccache
