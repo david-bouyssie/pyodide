@@ -152,6 +152,7 @@ jobs:
           source pyodide_env.sh
           export PATH="$NODE24_DIR:$PATH"
           ccache -z
+          rm -rf packages/cffi
           PYODIDE_PACKAGES="tag:core" make -j3
           ccache -s
 
