@@ -154,6 +154,29 @@ run_main()
   return exitcode;
 }
 
+extern __thread PyThreadState *_Py_tss_tstate;
+
+EM_JS(void, log_restore_tss, (int before, int after), {
+  console.error(
+    "restore_tss_tstate: before=0x" + before.toString(16) +
+    ", after=0x" + after.toString(16)
+  );
+});
+
+EMSCRIPTEN_KEEPALIVE void
+restore_tss_tstate(void)
+{
+  PyThreadState *before = _Py_tss_tstate;
+  if (!before) {
+    PyThreadState *tss = PyGILState_GetThisThreadState();
+    if (tss) {
+      _Py_tss_tstate = tss;
+    }
+  }
+  log_restore_tss((int)(uintptr_t)before,
+                  (int)(uintptr_t)_Py_tss_tstate);
+}
+
 void
 set_suspender(JsVal suspender);
 

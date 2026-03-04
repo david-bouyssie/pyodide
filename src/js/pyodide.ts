@@ -390,7 +390,11 @@ async function createPyodideModule(
   // This ensures preimport_bootstrap_modules() completes and API._pyodide
   // is set before finalizeBootstrap runs.
   if (needsExplicitMain) {
+    console.error("pyodide.ts: about to call _main()");
     await module._main();
+    console.error("pyodide.ts: _main() resolved, calling restore_tss_tstate");
+    module._restore_tss_tstate();
+    console.error("pyodide.ts: restore_tss_tstate done");
   }
 
   // In JSPI mode, permanently route all callPyObject invocations through the

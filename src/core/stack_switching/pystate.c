@@ -21,10 +21,24 @@ int pystate_keepalive;
 
 // Direct access to CPython's thread-local current tstate pointer.
 // On single-threaded Emscripten/wasm, __thread is a plain global.
-// We write this directly to avoid PyThreadState_Swap's full
-// attach/detach/GIL machinery in CPython 3.13, which has stricter
-// invariants that JSPI stack switching violates.
+// We write this directly to bypass CPython 3.13's _PyThreadState_Attach
+// / _PyThreadState_Detach / GIL lock machinery, which corrupts the
+// stack in JSPI mode.
 extern __thread PyThreadState *_Py_tss_tstate;
+
+EM_JS(void, log_capture_ts, (int old_ts, int new_ts), {
+  console.error(
+    "captureThreadState: saved=0x" + old_ts.toString(16) +
+    ", new=0x" + new_ts.toString(16)
+  );
+});
+
+EM_JS(void, log_restore_ts, (int was_ts, int restored_ts), {
+  console.error(
+    "restoreThreadState: was=0x" + was_ts.toString(16) +
+    ", restored=0x" + restored_ts.toString(16)
+  );
+});
 
 typedef struct
 {
@@ -144,6 +158,8 @@ captureThreadState()
   // invariants in CPython 3.13 that JSPI violates.
   res->ts = _Py_tss_tstate;
   _Py_tss_tstate = tstate;
+  log_capture_ts((int)(uintptr_t)res->ts,
+                 (int)(uintptr_t)tstate);
 
   PyObject* _asyncio_module = NULL;
   PyObject* t = NULL;
@@ -164,6 +180,8 @@ restoreThreadState(ThreadState* state)
   // Direct pointer swap — bypass Attach/Detach.
   PyThreadState* res = _Py_tss_tstate;
   _Py_tss_tstate = state->ts;
+  log_restore_ts((int)(uintptr_t)res,
+                 (int)(uintptr_t)state->ts);
   if (threadstate_freelist_len == THREADSTATE_MAX_FREELIST) {
     PyThreadState_Delete(res);
   } else {
