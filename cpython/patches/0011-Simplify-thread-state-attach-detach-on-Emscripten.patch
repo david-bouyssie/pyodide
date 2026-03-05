@@ -11,13 +11,15 @@ stack switching). Since there is physically only one thread, all the
 synchronization is unnecessary. Simplify to just setting/clearing the
 fast thread-local pointer, the active flag, and the state field.
 ---
- Python/pystate.c | 24 ++++++++++++++++++++++++
- 1 file changed, 24 insertions(+)
+ Python/pystate.c | 26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
 
 diff --git a/Python/pystate.c b/Python/pystate.c
+index 1234567890a..1234567890b 100644
 --- a/Python/pystate.c
 +++ b/Python/pystate.c
-@@ -2073,6 +2073,18 @@ void
+@@ -2073,6 +2073,19 @@
+ void
  _PyThreadState_Attach(PyThreadState *tstate)
  {
 +#ifdef __EMSCRIPTEN__
@@ -36,7 +38,7 @@ diff --git a/Python/pystate.c b/Python/pystate.c
  #if defined(Py_DEBUG)
      // This is called from PyEval_RestoreThread(). Similar
      // to it, we need to ensure errno doesn't change.
-@@ -2126,6 +2138,18 @@ _PyThreadState_Attach(PyThreadState *tstate)
+@@ -2126,6 +2139,19 @@
  static void
  detach_thread(PyThreadState *tstate, int detached_state)
  {
@@ -56,3 +58,5 @@ diff --git a/Python/pystate.c b/Python/pystate.c
      // XXX assert(tstate_is_alive(tstate) && tstate_is_bound(tstate));
      assert(_Py_atomic_load_int_relaxed(&tstate->state) == _Py_THREAD_ATTACHED);
      assert(tstate == current_fast_get());
+--
+2.34.1
