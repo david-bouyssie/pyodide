@@ -110,7 +110,7 @@ function installJspiOverrides(
   }
 
   // Internal map — intentionally not exposed on API
-  const jspiOverrides: Record<string, { fn: Function; orig: Function }> = {};
+  const jspiOverrides: Record<string, { fn: (...args: any[]) => any; orig: (...args: any[]) => any }> = {};
 
   function installOne(ns: { [name: string]: any }, name: string): void {
     const orig = ns[name];
