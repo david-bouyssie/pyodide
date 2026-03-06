@@ -119,26 +119,18 @@ function instrumentSyscallImports(imports: {
     );
   }
 
+  // Replace each Suspending-wrapped syscall with a wrapper that calls the raw
+  // synchronous function directly. Returning a plain value (not a Promise)
+  // means Suspending won't attempt to suspend — safe to call with or without
+  // a promising frame on the stack.
   for (const name of BRIDGED_ENV_SYSCALLS) {
     const rawFn = findRaw(name);
     if (!rawFn || !imports.env?.[name]) continue;
 
-    const asyncWrapper = async function (...args: any[]) {
-      const asyncFS = (globalThis as any).Module?.asyncFS;
-      if (asyncFS && asyncFS[name]) {
-        try {
-          return await asyncFS[name](...args);
-        } catch (e) {
-          if ((e as any)?.fallthrough) {
-            return rawFn(...args);
-          }
-          throw e;
-        }
-      }
+    const wrapper = function (...args: any[]) {
       return rawFn(...args);
     };
-
-    imports.env[name] = new RealSuspending(asyncWrapper);
+    imports.env[name] = new RealSuspending(wrapper);
   }
 
   const wasiNs = imports.wasi_snapshot_preview1;
@@ -148,22 +140,10 @@ function instrumentSyscallImports(imports: {
     const rawFn = findRaw(name);
     if (!rawFn || !wasiNs[name]) continue;
 
-    const asyncWrapper = async function (...args: any[]) {
-      const asyncFS = (globalThis as any).Module?.asyncFS;
-      if (asyncFS && asyncFS[name]) {
-        try {
-          return await asyncFS[name](...args);
-        } catch (e) {
-          if ((e as any)?.fallthrough) {
-            return rawFn(...args);
-          }
-          throw e;
-        }
-      }
+    const wrapper = function (...args: any[]) {
       return rawFn(...args);
     };
-
-    wasiNs[name] = new RealSuspending(asyncWrapper);
+    wasiNs[name] = new RealSuspending(wrapper);
   }
 }
 
