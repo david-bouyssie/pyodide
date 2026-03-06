@@ -182,12 +182,31 @@ export function createSettings(
     thisProgram: config._sysExecutable,
     arguments: config.args,
     API,
+    // Emscripten calls locateFile exactly one time with argument
+    // pyodide.asm.wasm to get the URL it should download it from.
+    //
+    // If we set instantiateWasm the return value of locateFile actually is
+    // unused, but Emscripten calls it anyways. We set instantiateWasm except
+    // when compiling with source maps, see comment in getInstantiateWasmFunc().
+    //
+    // It also is called when Emscripten tries to find a dependency of a shared
+    // library but it failed to find it in the file system. But for us that
+    // means dependency resolution has already failed and we want to throw an
+    // error anyways.
     locateFile: (path: string) => config.indexURL + path,
     instantiateWasm: getInstantiateWasmFunc(config.indexURL, API),
   };
   return settings;
 }
 
+/**
+ * Make the home directory inside the virtual file system,
+ * then change the working directory to it.
+ *
+ * @param Module The Emscripten Module.
+ * @param path The path to the home directory.
+ * @private
+ */
 function createHomeDirectory(path: string): PreRunFunc {
   return function (Module) {
     const fallbackPath = "/";
@@ -209,6 +228,10 @@ function setEnvironment(env: { [key: string]: string }): PreRunFunc {
   };
 }
 
+/**
+ * Mount local directories to the virtual file system. Only for Node.js.
+ * @param mounts The list of paths to mount.
+ */
 function callFsInitHook(
   fsInit: undefined | ((fs: FSType, info: { sitePackages: string }) => void),
 ): PreRunFunc[] {
@@ -235,6 +258,19 @@ function computeVersionTuple(Module: PyodideModule): [number, number, number] {
   return [major, minor, micro];
 }
 
+/**
+ * Install the Python standard library to the virtual file system.
+ *
+ * Previously, this was handled by Emscripten's file packager (pyodide.asm.data).
+ * However, using the file packager means that we have only one version
+ * of the standard library available. We want to be able to use different
+ * versions of the standard library, for example:
+ *
+ * - Use compiled(.pyc) or uncompiled(.py) standard library.
+ * - Remove unused modules or add additional modules using bundlers like pyodide-pack.
+ *
+ * @param stdlibURL The URL for the Python standard library
+ */
 function installStdlib(stdlibURL: string): PreRunFunc {
   const stdlibPromise: Promise<Uint8Array> = loadBinaryFile(stdlibURL);
   return async (Module: PyodideModule) => {
@@ -257,6 +293,10 @@ function installStdlib(stdlibURL: string): PreRunFunc {
   };
 }
 
+/**
+ * Initialize the virtual file system, before loading Python interpreter.
+ * @private
+ */
 function getFileSystemInitializationFuncs(
   config: PyodideConfigWithDefaults,
 ): PreRunFunc[] {
@@ -282,6 +322,13 @@ function getInstantiateWasmFunc(
 ): EmscriptenSettings["instantiateWasm"] {
   // @ts-ignore
   if (SOURCEMAP || typeof WasmOffsetConverter !== "undefined") {
+    // According to the docs:
+    //
+    // "Sanitizers or source map is currently not supported if overriding
+    // WebAssembly instantiation with Module.instantiateWasm."
+    // https://emscripten.org/docs/api_reference/module.html?highlight=instantiatewasm#Module.instantiateWasm
+    //
+    // typeof WasmOffsetConverter !== "undefined" checks for asan.
     return;
   }
   const { binary, response } = getBinaryResponse(indexURL + "pyodide.asm.wasm");
@@ -319,6 +366,6 @@ function getInstantiateWasmFunc(
       }
     })();
 
-    return {};
+    return {}; // Compiling asynchronously, no exports.
   };
 }
