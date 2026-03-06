@@ -35,6 +35,129 @@ export interface EmscriptenSettings {
   INITIAL_MEMORY?: number;
   exitCode?: number;
 }
+
+// ============================================================================
+// JSPI overrides: runtime-swappable async syscall implementations
+// ============================================================================
+//
+// Emscripten is built with -sJSPI_IMPORTS='[]' so it never Suspending-wraps
+// any import. For the syscalls BridgedFS needs to make async, we install our
+// own Suspending wrapper over a mutable internal record here, before
+// instantiation:
+//
+//   jspiOverrides[name] = { fn: rawSyncFn, orig: rawSyncFn }
+//   importSlot = new Suspending(async (...a) => await jspiOverrides[name].fn(...a))
+//
+// WASM captures importSlot at link time (immutable).
+// fn is swappable at any time via the public API:
+//   API.setJspiOverride("fd_read", myAsyncHandler);  // BridgedFS on
+//   API.removeJspiOverride("fd_read");               // BridgedFS off (restores orig)
+//
+// jspiOverrides is intentionally internal — never exposed on API.
+// Syscalls NOT listed here stay as plain sync imports — never suspend,
+// safe to call from any context (loadPackage, print, etc.)
+
+/** env namespace: Linux syscall wrappers */
+const JSPI_ENV_SYSCALLS: readonly string[] = [
+  "__syscall_openat",
+  "__syscall_stat64",
+  "__syscall_fstat64",
+  "__syscall_newfstatat",
+  "__syscall_fcntl64",
+  "__syscall_ioctl",
+  "__syscall_faccessat",
+  "__syscall_getdents64",
+  "__syscall_readlinkat",
+  "__syscall_mkdirat",
+  "__syscall_unlinkat",
+  "__syscall_renameat",
+  "__syscall_rmdir",
+  "__syscall_chmod",
+  "__syscall_fchmod",
+  "__syscall_truncate64",
+  "__syscall_ftruncate64",
+];
+
+/** wasi_snapshot_preview1 namespace: WASI fd operations */
+const JSPI_WASI_SYSCALLS: readonly string[] = [
+  "fd_read",
+  "fd_write",
+  "fd_pread",
+  "fd_pwrite",
+  "fd_seek",
+  "fd_close",
+  "fd_sync",
+  "fd_fdstat_get",
+];
+
+/**
+ * Install Suspending-wrapped trampolines for every syscall in JSPI_ENV_SYSCALLS
+ * and JSPI_WASI_SYSCALLS. Must be called after instrumentWasmImports() has run
+ * (so the raw sync functions are in `imports`) but before
+ * WebAssembly.instantiate() (so WASM captures our wrappers).
+ *
+ * Exposes API.setJspiOverride and API.removeJspiOverride for BridgedFS.
+ */
+function installJspiOverrides(
+  imports: { [ns: string]: { [name: string]: any } },
+  API: API,
+): void {
+  if (
+    typeof WebAssembly === "undefined" ||
+    !("Suspending" in WebAssembly)
+  ) {
+    return;
+  }
+
+  // Internal map — intentionally not exposed on API
+  const jspiOverrides: Record<string, { fn: Function; orig: Function }> = {};
+
+  function installOne(ns: { [name: string]: any }, name: string): void {
+    const orig = ns[name];
+    if (typeof orig !== "function") return;
+    jspiOverrides[name] = { fn: orig, orig };
+    ns[name] = new (WebAssembly as any).Suspending(
+      async function (...args: any[]) {
+        return await jspiOverrides[name].fn(...args);
+      },
+    );
+  }
+
+  const envNs = imports.env;
+  if (envNs) {
+    for (const name of JSPI_ENV_SYSCALLS) installOne(envNs, name);
+  }
+
+  const wasiNs = imports.wasi_snapshot_preview1;
+  if (wasiNs) {
+    for (const name of JSPI_WASI_SYSCALLS) installOne(wasiNs, name);
+  }
+
+  API.getJspiOverride = function (name: string): (...args: any[]) => any {
+    if (!jspiOverrides[name]) {
+      throw new Error(`getJspiOverride: unknown syscall "${name}"`);
+    }
+    return jspiOverrides[name].fn;
+  };
+
+  API.setJspiOverride = function (
+    name: string,
+    impl: (...args: any[]) => any,
+  ): void {
+    if (!jspiOverrides[name]) {
+      throw new Error(`setJspiOverride: unknown syscall "${name}"`);
+    }
+    jspiOverrides[name].fn = impl;
+  };
+
+  API.removeJspiOverride = function (name: string): void {
+    if (!jspiOverrides[name]) {
+      throw new Error(`removeJspiOverride: unknown syscall "${name}"`);
+    }
+    jspiOverrides[name].fn = jspiOverrides[name].orig;
+  };
+}
+
 // ============================================================================
 
 /**
@@ -60,7 +183,7 @@ export function createSettings(
     arguments: config.args,
     API,
     locateFile: (path: string) => config.indexURL + path,
-    instantiateWasm: getInstantiateWasmFunc(config.indexURL),
+    instantiateWasm: getInstantiateWasmFunc(config.indexURL, API),
   };
   return settings;
 }
@@ -155,6 +278,7 @@ function getFileSystemInitializationFuncs(
 
 function getInstantiateWasmFunc(
   indexURL: string,
+  API: API,
 ): EmscriptenSettings["instantiateWasm"] {
   // @ts-ignore
   if (SOURCEMAP || typeof WasmOffsetConverter !== "undefined") {
@@ -174,6 +298,11 @@ function getInstantiateWasmFunc(
         await jsvErrorImportPromise;
       imports.env.Jsv_GetError_import = Jsv_GetError_import;
       imports.env.JsvError_Check = JsvError_Check;
+
+      // Install Suspending-wrapped trampolines for BridgedFS-capable syscalls.
+      // Emscripten built with -sJSPI_IMPORTS='[]' so imports arrive here
+      // as plain sync functions — installJspiOverrides wraps the ones we need.
+      installJspiOverrides(imports, API);
 
       try {
         let res: WebAssembly.WebAssemblyInstantiatedSource;

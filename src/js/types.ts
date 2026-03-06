@@ -477,6 +477,9 @@ export interface API {
   inTestHoist?: boolean;
   on_fatal?: (e: any) => void;
   _skip_unwind_fatal_error?: boolean;
+  getJspiOverride: (name: string) => (...args: any[]) => any;
+  setJspiOverride: (name: string, impl: (...args: any[]) => any) => void;
+  removeJspiOverride: (name: string) => void;
   capture_stderr: () => void;
   restore_stderr: () => string;
   fatal_loading_error: (...args: string[]) => never;
