@@ -9,16 +9,17 @@ _Py_qsbr_attach/detach, critical sections, etc.) corrupts the wasm
 stack when running under JSPI (JavaScript Promise Integration / WebAssembly
 stack switching). Since there is physically only one thread, all the
 synchronization is unnecessary. Simplify to just setting/clearing the
-fast thread-local pointer, the active flag, and the state field.
+fast thread-local pointer, the active flag, the state field, and the
+gilstate TSS binding.
 ---
- Python/pystate.c | 26 ++++++++++++++++++++++++++
- 1 file changed, 26 insertions(+)
+ Python/pystate.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
 
 diff --git a/Python/pystate.c b/Python/pystate.c
 index 1234567890a..1234567890b 100644
 --- a/Python/pystate.c
 +++ b/Python/pystate.c
-@@ -2073,6 +2073,19 @@
+@@ -2073,6 +2073,21 @@
  void
  _PyThreadState_Attach(PyThreadState *tstate)
  {
@@ -26,27 +27,30 @@ index 1234567890a..1234567890b 100644
 +    // On single-threaded Emscripten/WASM, the full attach/detach/lock
 +    // machinery corrupts the wasm stack under JSPI (WebAssembly stack
 +    // switching). Since there is only one thread, skip all locking and
-+    // just set the thread-local pointer directly.
++    // just set the thread-local pointer and gilstate TSS directly.
 +    _Py_EnsureTstateNotNULL(tstate);
 +    if (current_fast_get() == NULL) {
 +        current_fast_set(&_PyRuntime, tstate);
 +    }
 +    tstate->state = _Py_THREAD_ATTACHED;
 +    tstate->_status.active = 1;
++    _gilstate_tss_set(tstate->interp->runtime, tstate);
++    tstate->_status.bound_gilstate = 1;
 +    return;
 +#endif
  #if defined(Py_DEBUG)
      // This is called from PyEval_RestoreThread(). Similar
      // to it, we need to ensure errno doesn't change.
-@@ -2126,6 +2139,19 @@
+@@ -2126,6 +2141,20 @@
  static void
  detach_thread(PyThreadState *tstate, int detached_state)
  {
 +#ifdef __EMSCRIPTEN__
 +    // On single-threaded Emscripten/WASM, skip all synchronization.
-+    // Just clear the active flag, set the detached state, and clear
-+    // the thread-local pointer.
++    // Just clear the active flag, unbind gilstate, set the detached
++    // state, and clear the thread-local pointer.
 +    tstate->_status.active = 0;
++    tstate->_status.bound_gilstate = 0;
 +#ifdef Py_GIL_DISABLED
 +    _Py_atomic_store_int(&tstate->state, detached_state);
 +#else
