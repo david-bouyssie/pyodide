@@ -122,10 +122,6 @@ jobs:
           source pyodide_env.sh
           export PATH="$NODE24_DIR:$PATH"
           ccache -z
-          rm -rf packages/cffi
-          # Patch pyodide-build to accept free-threaded (cp313t) wheel tags
-          BUILD_ENV=$(python -c "import pyodide_build.build_env; print(pyodide_build.build_env.__file__)")
-          sed -i '/yield from cpython_tags/a\    # Free-threaded (nogil) builds produce cp313t ABI tags\n    abi_t = f"cp{PYMAJOR}{PYMINOR}t"\n    for p in PLATFORMS:\n        yield Tag(f"cp{PYMAJOR}{PYMINOR}", abi_t, p)' "$BUILD_ENV"
           PYODIDE_PACKAGES="tag:core" make -j3
           ccache -s
 

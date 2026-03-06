@@ -251,15 +251,14 @@ function installStdlib(stdlibURL: string): PreRunFunc {
   return async (Module: PyodideModule) => {
     Module.API.pyVersionTuple = computeVersionTuple(Module);
     const [pymajor, pyminor] = Module.API.pyVersionTuple;
-    const abiThread = Module.jspiSupported ? "t" : "";
     Module.FS.mkdirTree("/lib");
-    Module.API.sitePackages = `/lib/python${pymajor}.${pyminor}${abiThread}/site-packages`;
+    Module.API.sitePackages = `/lib/python${pymajor}.${pyminor}/site-packages`;
     Module.FS.mkdirTree(Module.API.sitePackages);
     Module.addRunDependency("install-stdlib");
 
     try {
       const stdlib = await stdlibPromise;
-      Module.FS.writeFile(`/lib/python${pymajor}${pyminor}${abiThread}.zip`, stdlib);
+      Module.FS.writeFile(`/lib/python${pymajor}${pyminor}.zip`, stdlib);
     } catch (e) {
       console.error("Error occurred while installing the standard library:");
       console.error(e);

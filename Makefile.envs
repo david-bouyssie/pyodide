@@ -16,13 +16,8 @@ export PYODIDE_PREBUILT_PACKAGES_URL=$(PYODIDE_PREBUILT_PACKAGES_BASE)/packages.
 export PYODIDE_PREBUILT_PACKAGES_LOCKFILE=$(PYODIDE_PREBUILT_PACKAGES_BASE)/pyodide-lock.json
 export ENABLE_PREBUILT_PACKAGES ?= 0
 
-# Free-threaded (nogil) build for JSPI compatibility.
-# CPython's --disable-gil sets ABI suffix to 't' (or 'td' for debug+nogil).
-# This changes library/include paths (e.g. libpython3.13t.a, python3.13t/).
 ifdef CPYTHON_DEBUG
-	export CPYTHON_ABI_FLAGS=td
-else
-	export CPYTHON_ABI_FLAGS=t
+	export CPYTHON_ABI_FLAGS=d
 endif
 
 export PLATFORM_TRIPLET=wasm32-emscripten
@@ -52,7 +47,7 @@ export PYTHON_ARCHIVE_URL=https://www.python.org/ftp/python/$(PYSTABLEVERSION)/P
 
 export CPYTHONROOT=$(PYODIDE_ROOT)/cpython
 export CPYTHONINSTALL=$(CPYTHONROOT)/installs/python-$(PYVERSION)
-export CPYTHONLIB=$(CPYTHONINSTALL)/lib/python$(PYMAJOR).$(PYMINOR)$(CPYTHON_ABI_FLAGS)
+export CPYTHONLIB=$(CPYTHONINSTALL)/lib/python$(PYMAJOR).$(PYMINOR)
 export SYSCONFIGDATA_DIR=$(CPYTHONINSTALL)/sysconfigdata/
 export CPYTHONBUILD=$(CPYTHONROOT)/build/Python-$(PYVERSION)/
 
