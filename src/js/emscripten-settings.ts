@@ -35,120 +35,6 @@ export interface EmscriptenSettings {
   INITIAL_MEMORY?: number;
   exitCode?: number;
 }
-
-// ============================================================================
-// JSPI: Suspending monkey-patch for async FS routing (D.6 technique)
-// ============================================================================
-
-const capturedRawSyscalls: Map<string, Function> = new Map();
-let RealSuspending: any = null;
-let suspendingPatched = false;
-
-/**
- * Monkey-patch WebAssembly.Suspending to capture raw syscall functions.
- * Must be called BEFORE _createPyodideModule() which triggers Emscripten's
- * instrumentWasmImports().
- */
-export function installSuspendingMonkeyPatch(): void {
-  if (
-    suspendingPatched ||
-    typeof WebAssembly === "undefined" ||
-    !("Suspending" in WebAssembly)
-  ) {
-    return;
-  }
-
-  RealSuspending = (WebAssembly as any).Suspending;
-
-  (WebAssembly as any).Suspending = function PatchedSuspending(fn: Function) {
-    const name = fn.name || "(anonymous)";
-    capturedRawSyscalls.set(name, fn);
-    return new RealSuspending(fn);
-  };
-
-  suspendingPatched = true;
-}
-
-const BRIDGED_ENV_SYSCALLS = [
-  "__syscall_openat",
-  "__syscall_stat64",
-  "__syscall_fstat64",
-  "__syscall_newfstatat",
-  "__syscall_fcntl64",
-  "__syscall_ioctl",
-  "__syscall_faccessat",
-  "__syscall_getdents64",
-  "__syscall_readlinkat",
-  "__syscall_mkdirat",
-  "__syscall_unlinkat",
-  "__syscall_renameat",
-  "__syscall_rmdir",
-  "__syscall_chmod",
-  "__syscall_fchmod",
-  "__syscall_truncate64",
-  "__syscall_ftruncate64",
-];
-
-const BRIDGED_WASI_SYSCALLS = [
-  "fd_read",
-  "fd_write",
-  "fd_pread",
-  "fd_pwrite",
-  "fd_seek",
-  "fd_close",
-  "fd_sync",
-  "fd_fdstat_get",
-];
-
-/**
- * Replace Suspending-wrapped syscall imports with routing wrappers.
- * Called from getInstantiateWasmFunc, before WebAssembly.instantiate.
- */
-function instrumentSyscallImports(imports: {
-  [key: string]: { [key: string]: any };
-}): void {
-  if (!RealSuspending || capturedRawSyscalls.size === 0) {
-    return;
-  }
-
-  function findRaw(name: string): Function | undefined {
-    return (
-      capturedRawSyscalls.get("_" + name) ||
-      capturedRawSyscalls.get(name) ||
-      capturedRawSyscalls.get("___" + name)
-    );
-  }
-
-  // Replace each Suspending-wrapped syscall with a wrapper that calls the raw
-  // synchronous function directly. Returning a plain value (not a Promise)
-  // means Suspending won't attempt to suspend — safe to call with or without
-  // a promising frame on the stack.
-  for (const name of BRIDGED_ENV_SYSCALLS) {
-    const rawFn = findRaw(name);
-    if (!rawFn || !imports.env?.[name]) continue;
-
-    const wrapper = function (...args: any[]) {
-      return rawFn(...args);
-    };
-    imports.env[name] = new RealSuspending(wrapper);
-  }
-
-  const wasiNs = imports.wasi_snapshot_preview1;
-  if (!wasiNs) return;
-
-  for (const name of BRIDGED_WASI_SYSCALLS) {
-    const rawFn = findRaw(name);
-    if (!rawFn || !wasiNs[name]) continue;
-
-    const wrapper = function (...args: any[]) {
-      return rawFn(...args);
-    };
-    wasiNs[name] = new RealSuspending(wrapper);
-  }
-}
-
-// ============================================================================
-// Original emscripten-settings.ts code (unchanged except getInstantiateWasmFunc)
 // ============================================================================
 
 /**
@@ -288,9 +174,6 @@ function getInstantiateWasmFunc(
         await jsvErrorImportPromise;
       imports.env.Jsv_GetError_import = Jsv_GetError_import;
       imports.env.JsvError_Check = JsvError_Check;
-
-      // JSPI: Replace Suspending-wrapped syscalls with routing wrappers
-      instrumentSyscallImports(imports);
 
       try {
         let res: WebAssembly.WebAssemblyInstantiatedSource;

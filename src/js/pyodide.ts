@@ -10,10 +10,7 @@ import {
   calculateInstallBaseUrl,
 } from "./compat";
 
-import {
-  createSettings,
-  installSuspendingMonkeyPatch,
-} from "./emscripten-settings";
+import { createSettings } from "./emscripten-settings";
 import { version as version_ } from "./version";
 
 import type { PyodideAPI } from "./api.js";
@@ -368,9 +365,6 @@ async function prepareSnapshot(
 async function createPyodideModule(
   emscriptenSettings: EmscriptenSettings,
 ): Promise<PyodideModule> {
-  // JSPI: capture raw syscall functions before Emscripten wraps them
-  installSuspendingMonkeyPatch();
-
   // With JSPI, main() is wrapped with WebAssembly.promising() and returns a
   // Promise. Emscripten's runtime calls main() fire-and-forget during module
   // init without awaiting it, so main() hasn't completed by the time the
