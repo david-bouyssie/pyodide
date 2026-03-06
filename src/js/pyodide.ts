@@ -231,6 +231,18 @@ export interface PyodideConfig {
 
   /** @ignore */
   cdnUrl?: string;
+
+  /**
+   * Called before WASM instantiation, allowing modification of imports.
+   * This is the hook point for BridgedFS to replace syscall imports
+   * with async-capable implementations.
+   *
+   * @param context.imports The WebAssembly imports object (mutable)
+   * @experimental
+   */
+  onBeforeWasmInstantiate?: (context: {
+    imports: { [ns: string]: { [name: string]: any } };
+  }) => Promise<void>;
 }
 
 /**
@@ -289,6 +301,7 @@ async function initializeConfiguration(
     enableRunUntilComplete: true,
     checkAPIVersion: true,
     BUILD_ID,
+    onBeforeWasmInstantiate: undefined,
   };
   const config = Object.assign(
     defaultConfig,
