@@ -90,11 +90,11 @@ export async function initializePackageIndex(
 
   // Set up module_not_found_hook
   const importhook = API._pyodide._importhook;
-  await importhook.register_module_not_found_hook(
+  importhook.register_module_not_found_hook(
     API._import_name_to_package_name,
     API.lockfile_unvendored_stdlibs_and_test,
   );
-  await API.package_loader.init_loaded_packages();
+  API.package_loader.init_loaded_packages();
 }
 
 const DEFAULT_CHANNEL = "default channel";

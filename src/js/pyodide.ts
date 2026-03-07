@@ -400,14 +400,6 @@ async function createPyodideModule(
     await module._main();
   }
 
-  // In JSPI mode, permanently route all callPyObject invocations through the
-  // promising-wrapped path so any JS→wasm call can safely suspend for I/O.
-  // At this point initSuspenders has completed (preRun callback), so the
-  // promising handlers are ready.
-  if (module.jspiSupported) {
-    module.callPyObject = module.callPyObjectMaybePromising;
-  }
-
   // Handle early exit
   if (emscriptenSettings.exitCode !== undefined) {
     throw new module.ExitStatus(emscriptenSettings.exitCode);
@@ -454,11 +446,11 @@ If you updated the Pyodide version, make sure you also updated the 'indexURL' pa
 /**
  * @private
  */
-async function bootstrapPyodide(
+function bootstrapPyodide(
   pyodideModule: PyodideModule,
   snapshot: Uint8Array | undefined,
   config: PyodideConfigWithDefaults,
-): Promise<PyodideAPI> {
+): PyodideAPI {
   const API = pyodideModule.API;
 
   let snapshotConfig: SnapshotConfig | undefined = undefined;
@@ -467,7 +459,7 @@ async function bootstrapPyodide(
   }
 
   // runPython works starting after the call to finalizeBootstrap.
-  const pyodide = await API.finalizeBootstrap(
+  const pyodide = API.finalizeBootstrap(
     snapshotConfig,
     config._snapshotDeserializer,
   );
@@ -484,9 +476,9 @@ async function finalizeSetup(
 ): Promise<PyodideAPI> {
   const API = (pyodide as any)._api;
 
-  await API.sys.path.insert(0, "");
+  API.sys.path.insert(0, "");
 
-  await API._pyodide.set_excepthook();
+  API._pyodide.set_excepthook();
   await API.packageIndexReady;
 
   // I think we want this initializeStreams call to happen after
@@ -532,7 +524,7 @@ export async function loadPyodide(
   configureAPI(pyodideModule, config);
 
   // Stage 7: Bootstrap Python interpreter
-  const pyodide = await bootstrapPyodide(pyodideModule, snapshot, config);
+  const pyodide = bootstrapPyodide(pyodideModule, snapshot, config);
 
   // Stage 8: Finalize setup and initialize streams
   return await finalizeSetup(pyodide, config);
